@@ -1128,6 +1128,20 @@ pub fn run() {
                 log::info!("✓ XaiOAuthManager initialized");
             }
 
+            // 初始化 CodeBuddyOAuthManager (腾讯云 CodeBuddy 反代)
+            {
+                use crate::proxy::providers::codebuddy_oauth_auth::CodeBuddyOAuthManager;
+                use commands::CodeBuddyOAuthState;
+                use tokio::sync::RwLock;
+
+                let app_config_dir = crate::config::get_app_config_dir();
+                let codebuddy_oauth_manager = CodeBuddyOAuthManager::new(app_config_dir);
+                app.manage(CodeBuddyOAuthState(Arc::new(RwLock::new(
+                    codebuddy_oauth_manager,
+                ))));
+                log::info!("✓ CodeBuddyOAuthManager initialized");
+            }
+
             // 初始化全局出站代理 HTTP 客户端
             {
                 let db = &app.state::<AppState>().db;

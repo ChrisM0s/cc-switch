@@ -14,6 +14,9 @@
 mod adapter;
 mod auth;
 mod claude;
+pub mod codebuddy_auth_form;
+pub mod codebuddy_oauth_auth;
+pub mod codebuddy_transform;
 mod codex;
 pub(crate) mod codex_chat_common;
 pub mod codex_chat_history;
@@ -46,6 +49,7 @@ use serde::{Deserialize, Serialize};
 
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 pub const XAI_API_BASE_URL: &str = "https://api.x.ai/v1";
+pub const CODEBUDDY_API_BASE_URL: &str = codebuddy_oauth_auth::CODEBUDDY_INTERNATIONAL_BASE_URL;
 
 // 公开导出
 pub use adapter::ProviderAdapter;
@@ -90,6 +94,8 @@ pub enum ProviderType {
     CodexOAuth,
     /// xAI Grok OAuth（需要 Anthropic ↔ Responses API 转换）
     XaiOAuth,
+    /// CodeBuddy OAuth（腾讯云 CodeBuddy，需要 Anthropic ↔ CodeBuddy Chat Completions 转换）
+    CodeBuddyOAuth,
 }
 
 impl ProviderType {
@@ -104,6 +110,7 @@ impl ProviderType {
             ProviderType::GitHubCopilot => true,
             ProviderType::CodexOAuth => true,
             ProviderType::XaiOAuth => true,
+            ProviderType::CodeBuddyOAuth => true,
             ProviderType::OpenRouter => false,
             _ => false,
         }
@@ -122,6 +129,7 @@ impl ProviderType {
             ProviderType::GitHubCopilot => "https://api.githubcopilot.com",
             ProviderType::CodexOAuth => CHATGPT_CODEX_BASE_URL,
             ProviderType::XaiOAuth => XAI_API_BASE_URL,
+            ProviderType::CodeBuddyOAuth => CODEBUDDY_API_BASE_URL,
         }
     }
 
@@ -150,6 +158,9 @@ impl ProviderType {
                     }
                     if meta.provider_type.as_deref() == Some("xai_oauth") {
                         return ProviderType::XaiOAuth;
+                    }
+                    if meta.provider_type.as_deref() == Some("codebuddy_oauth") {
+                        return ProviderType::CodeBuddyOAuth;
                     }
                 }
 
@@ -221,6 +232,7 @@ impl ProviderType {
             ProviderType::GitHubCopilot => "github_copilot",
             ProviderType::CodexOAuth => "codex_oauth",
             ProviderType::XaiOAuth => "xai_oauth",
+            ProviderType::CodeBuddyOAuth => "codebuddy_oauth",
         }
     }
 }
@@ -247,6 +259,9 @@ impl std::str::FromStr for ProviderType {
             }
             "codex_oauth" | "codex-oauth" | "codexoauth" => Ok(ProviderType::CodexOAuth),
             "xai_oauth" | "xai-oauth" | "xaioauth" => Ok(ProviderType::XaiOAuth),
+            "codebuddy_oauth" | "codebuddy-oauth" | "codebuddyoauth" => {
+                Ok(ProviderType::CodeBuddyOAuth)
+            }
             _ => Err(format!("Invalid provider type: {s}")),
         }
     }
@@ -272,7 +287,8 @@ pub fn get_adapter_for_provider_type(provider_type: &ProviderType) -> Box<dyn Pr
         | ProviderType::OpenRouter
         | ProviderType::GitHubCopilot
         | ProviderType::CodexOAuth
-        | ProviderType::XaiOAuth => Box::new(ClaudeAdapter::new()),
+        | ProviderType::XaiOAuth
+        | ProviderType::CodeBuddyOAuth => Box::new(ClaudeAdapter::new()),
         ProviderType::Codex => Box::new(CodexAdapter::new()),
         ProviderType::Gemini | ProviderType::GeminiCli => Box::new(GeminiAdapter::new()),
     }

@@ -108,6 +108,7 @@ import {
   useCopilotAuth,
   useCodexOauth,
   useXaiOauth,
+  useCodeBuddyOauth,
 } from "./hooks";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useSettingsQuery } from "@/lib/query";
@@ -529,6 +530,11 @@ function ProviderFormFull({
     accounts: xaiOauthAccounts,
   } = useXaiOauth();
 
+  const {
+    isAuthenticated: isCodeBuddyOauthAuthenticated,
+    accounts: codebuddyOauthAccounts,
+  } = useCodeBuddyOauth();
+
   // 选中的 GitHub 账号 ID（多账号支持）
   const [selectedGitHubAccountId, setSelectedGitHubAccountId] = useState<
     string | null
@@ -541,6 +547,10 @@ function ProviderFormFull({
   const [selectedXaiAccountId, setSelectedXaiAccountId] = useState<
     string | null
   >(() => resolveManagedAccountId(initialData?.meta, "xai_oauth"));
+  const [selectedCodeBuddyAccountId, setSelectedCodeBuddyAccountId] =
+    useState<string | null>(() =>
+      resolveManagedAccountId(initialData?.meta, "codebuddy_oauth"),
+    );
   const [codexFastMode, setCodexFastMode] = useState<boolean>(
     () => initialData?.meta?.codexFastMode ?? false,
   );
@@ -1173,6 +1183,9 @@ function ProviderFormFull({
     const isXaiOauthProvider =
       presetProviderType === "xai_oauth" ||
       initialData?.meta?.providerType === "xai_oauth";
+    const isCodeBuddyOauthProvider =
+      presetProviderType === "codebuddy_oauth" ||
+      initialData?.meta?.providerType === "codebuddy_oauth";
     if (isCopilotProvider && !isCopilotAuthenticated) {
       toast.error(
         t("copilot.loginRequired", {
@@ -1193,6 +1206,14 @@ function ProviderFormFull({
       toast.error(
         t("xaiOauth.loginRequired", {
           defaultValue: "请先登录 xAI 账号",
+        }),
+      );
+      return;
+    }
+    if (isCodeBuddyOauthProvider && !isCodeBuddyOauthAuthenticated) {
+      toast.error(
+        t("codebuddyOauth.loginRequired", {
+          defaultValue: "请先登录 CodeBuddy 账号",
         }),
       );
       return;
@@ -1239,6 +1260,20 @@ function ProviderFormFull({
       );
       return;
     }
+    if (
+      isCodeBuddyOauthProvider &&
+      !selectedAccountIsUsable(
+        selectedCodeBuddyAccountId,
+        codebuddyOauthAccounts,
+      )
+    ) {
+      toast.error(
+        t("managedAuth.selectedAccountUnavailable", {
+          defaultValue: "已绑定账号不存在，请重新选择账号",
+        }),
+      );
+      return;
+    }
 
     // OMO Other Fields JSON：B 类（格式错了保存下去数据就坏了）
     if (
@@ -1275,7 +1310,12 @@ function ProviderFormFull({
     // cloud_provider（如 Bedrock）通过模板变量处理认证，跳过通用校验
     if (category !== "official" && category !== "cloud_provider") {
       if (appId === "claude") {
-        if (!isCodexOauthProvider && !isXaiOauthProvider && !baseUrl.trim()) {
+        if (
+          !isCodexOauthProvider &&
+          !isXaiOauthProvider &&
+          !isCodeBuddyOauthProvider &&
+          !baseUrl.trim()
+        ) {
           issues.push(
             t("providerForm.endpointRequired", {
               defaultValue: "非官方供应商请填写 API 端点",
@@ -1286,6 +1326,7 @@ function ProviderFormFull({
           !isCopilotProvider &&
           !isCodexOauthProvider &&
           !isXaiOauthProvider &&
+          !isCodeBuddyOauthProvider &&
           !apiKey.trim()
         ) {
           issues.push(
@@ -1365,6 +1406,9 @@ function ProviderFormFull({
     const isXaiOauthProvider =
       presetProviderType === "xai_oauth" ||
       initialData?.meta?.providerType === "xai_oauth";
+    const isCodeBuddyOauthProvider =
+      presetProviderType === "codebuddy_oauth" ||
+      initialData?.meta?.providerType === "codebuddy_oauth";
 
     let settingsConfig: string;
 
@@ -1575,7 +1619,13 @@ function ProviderFormFull({
                 authProvider: "xai_oauth",
                 accountId: selectedXaiAccountId ?? undefined,
               }
-            : undefined,
+            : isCodeBuddyOauthProvider
+              ? {
+                  source: "managed_account",
+                  authProvider: "codebuddy_oauth",
+                  accountId: selectedCodeBuddyAccountId ?? undefined,
+                }
+              : undefined,
       // GitHub Copilot 多账号：保存关联的账号 ID
       githubAccountId:
         isCopilotProvider && selectedGitHubAccountId
@@ -1651,6 +1701,7 @@ function ProviderFormFull({
         supportsFullUrl &&
         category !== "official" &&
         !isXaiOauthProvider &&
+        !isCodeBuddyOauthProvider &&
         localIsFullUrl
           ? true
           : undefined,
@@ -2212,6 +2263,10 @@ function ProviderFormFull({
                 presetProviderType === "xai_oauth" ||
                 initialData?.meta?.providerType === "xai_oauth"
               }
+              isCodeBuddyOauthPreset={
+                presetProviderType === "codebuddy_oauth" ||
+                initialData?.meta?.providerType === "codebuddy_oauth"
+              }
               usesOAuth={
                 templatePreset?.requiresOAuth === true ||
                 presetProviderType === "github_copilot" ||
@@ -2220,7 +2275,9 @@ function ProviderFormFull({
                 presetProviderType === "codex_oauth" ||
                 initialData?.meta?.providerType === "codex_oauth" ||
                 presetProviderType === "xai_oauth" ||
-                initialData?.meta?.providerType === "xai_oauth"
+                initialData?.meta?.providerType === "xai_oauth" ||
+                presetProviderType === "codebuddy_oauth" ||
+                initialData?.meta?.providerType === "codebuddy_oauth"
               }
               isCopilotAuthenticated={isCopilotAuthenticated}
               selectedGitHubAccountId={selectedGitHubAccountId}
@@ -2233,6 +2290,9 @@ function ProviderFormFull({
               isXaiOauthAuthenticated={isXaiOauthAuthenticated}
               selectedXaiAccountId={selectedXaiAccountId}
               onXaiAccountSelect={setSelectedXaiAccountId}
+              isCodeBuddyOauthAuthenticated={isCodeBuddyOauthAuthenticated}
+              selectedCodeBuddyAccountId={selectedCodeBuddyAccountId}
+              onCodeBuddyAccountSelect={setSelectedCodeBuddyAccountId}
               templateValueEntries={templateValueEntries}
               templateValues={templateValues}
               templatePresetName={templatePreset?.name || ""}

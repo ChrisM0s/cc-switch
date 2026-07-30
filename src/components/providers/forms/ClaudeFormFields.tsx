@@ -37,6 +37,7 @@ import { ApiKeySection, EndpointField, ModelInputWithFetch } from "./shared";
 import { CopilotAuthSection } from "./CopilotAuthSection";
 import { CodexOAuthSection } from "./CodexOAuthSection";
 import { XaiOAuthSection } from "./XaiOAuthSection";
+import { CodeBuddyOAuthSection } from "./CodeBuddyOAuthSection";
 import {
   copilotGetModels,
   copilotGetModelsForAccount,
@@ -105,6 +106,12 @@ interface ClaudeFormFieldsProps {
   isXaiOauthAuthenticated?: boolean;
   selectedXaiAccountId?: string | null;
   onXaiAccountSelect?: (accountId: string | null) => void;
+
+  // CodeBuddy OAuth
+  isCodeBuddyOauthPreset?: boolean;
+  isCodeBuddyOauthAuthenticated?: boolean;
+  selectedCodeBuddyAccountId?: string | null;
+  onCodeBuddyAccountSelect?: (accountId: string | null) => void;
 
   // Template Values
   templateValueEntries: Array<[string, TemplateValueConfig]>;
@@ -186,6 +193,9 @@ export function ClaudeFormFields({
   isXaiOauthAuthenticated,
   selectedXaiAccountId,
   onXaiAccountSelect,
+  isCodeBuddyOauthPreset,
+  selectedCodeBuddyAccountId,
+  onCodeBuddyAccountSelect,
   templateValueEntries,
   templateValues,
   templatePresetName,
@@ -236,23 +246,23 @@ export function ClaudeFormFields({
     defaultOpusModel ||
     defaultFableModel ||
     subagentModel ||
-    (!isXaiOauthPreset && apiFormat !== "anthropic") ||
+    (!isXaiOauthPreset && !isCodeBuddyOauthPreset && apiFormat !== "anthropic") ||
     apiKeyField !== "ANTHROPIC_AUTH_TOKEN" ||
     customUserAgent ||
     hasRequestOverrides
   );
   const [advancedExpanded, setAdvancedExpanded] = useState(
-    isXaiOauthPreset ? false : hasAnyAdvancedValue,
+    isXaiOauthPreset || isCodeBuddyOauthPreset ? false : hasAnyAdvancedValue,
   );
 
   // 预设填充高级值后自动展开（仅从折叠→展开，不会自动折叠）
   useEffect(() => {
-    if (isXaiOauthPreset) {
+    if (isXaiOauthPreset || isCodeBuddyOauthPreset) {
       setAdvancedExpanded(false);
     } else if (hasAnyAdvancedValue) {
       setAdvancedExpanded(true);
     }
-  }, [hasAnyAdvancedValue, isXaiOauthPreset]);
+  }, [hasAnyAdvancedValue, isXaiOauthPreset, isCodeBuddyOauthPreset]);
 
   // Copilot 可用模型列表
   const [copilotModels, setCopilotModels] = useState<CopilotModel[]>([]);
@@ -700,6 +710,13 @@ export function ClaudeFormFields({
         />
       )}
 
+      {isCodeBuddyOauthPreset && (
+        <CodeBuddyOAuthSection
+          selectedAccountId={selectedCodeBuddyAccountId}
+          onAccountSelect={onCodeBuddyAccountSelect}
+        />
+      )}
+
       {/* API Key 输入框（非 OAuth 预设时显示） */}
       {shouldShowApiKey && !usesOAuth && (
         <ApiKeySection
@@ -774,7 +791,9 @@ export function ClaudeFormFields({
           onManageClick={
             showEndpointTools ? () => onEndpointModalToggle(true) : undefined
           }
-          showFullUrlToggle={showEndpointTools && !isXaiOauthPreset}
+          showFullUrlToggle={
+            showEndpointTools && !isXaiOauthPreset && !isCodeBuddyOauthPreset
+          }
           isFullUrl={isFullUrl}
           onFullUrlChange={onFullUrlChange}
         />
@@ -820,7 +839,9 @@ export function ClaudeFormFields({
           )}
           <CollapsibleContent className="space-y-4 pt-2">
             {/* API 格式选择（仅非云服务商显示） */}
-            {category !== "cloud_provider" && !isXaiOauthPreset && (
+            {category !== "cloud_provider" &&
+              !isXaiOauthPreset &&
+              !isCodeBuddyOauthPreset && (
               <div className="space-y-2">
                 <FormLabel htmlFor="apiFormat">
                   {t("providerForm.apiFormat", { defaultValue: "API 格式" })}

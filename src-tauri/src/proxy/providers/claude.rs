@@ -46,6 +46,9 @@ pub fn get_claude_api_format(provider: &Provider) -> &'static str {
         ) {
             return "openai_responses";
         }
+        if meta.provider_type.as_deref() == Some("codebuddy_oauth") {
+            return "codebuddy";
+        }
     }
 
     // 1) Preferred: meta.apiFormat (SSOT, never written to Claude Code config)
@@ -96,7 +99,7 @@ pub fn get_claude_api_format(provider: &Provider) -> &'static str {
 pub fn claude_api_format_needs_transform(api_format: &str) -> bool {
     matches!(
         api_format,
-        "openai_chat" | "openai_responses" | "gemini_native"
+        "openai_chat" | "openai_responses" | "gemini_native" | "codebuddy"
     )
 }
 
@@ -455,6 +458,7 @@ pub fn transform_claude_request_for_api_format(
             Some(&provider.id),
             session_id,
         ),
+        "codebuddy" => super::codebuddy_transform::anthropic_to_codebuddy(body),
         _ => Ok(body),
     }
 }
@@ -496,6 +500,11 @@ impl ClaudeAdapter {
             return ProviderType::XaiOAuth;
         }
 
+        // 检测 CodeBuddy OAuth（腾讯云 CodeBuddy）
+        if self.is_codebuddy_oauth(provider) {
+            return ProviderType::CodeBuddyOAuth;
+        }
+
         // 检测 GitHub Copilot
         if self.is_github_copilot(provider) {
             return ProviderType::GitHubCopilot;
@@ -526,6 +535,11 @@ impl ClaudeAdapter {
 
     fn is_xai_oauth(&self, provider: &Provider) -> bool {
         provider.is_xai_oauth()
+    }
+
+    /// 检测是否为 CodeBuddy OAuth 供应商（腾讯云 CodeBuddy 反代）
+    fn is_codebuddy_oauth(&self, provider: &Provider) -> bool {
+        provider.is_codebuddy_oauth()
     }
 
     /// 检测是否为 GitHub Copilot 供应商
@@ -712,6 +726,11 @@ impl ProviderAdapter for ClaudeAdapter {
             return Ok(super::XAI_API_BASE_URL.to_string());
         }
 
+        // CodeBuddy OAuth: 强制使用 CodeBuddy 官方 API 端点（忽略用户配置的 base_url）
+        if self.is_codebuddy_oauth(provider) {
+            return Ok(super::CODEBUDDY_API_BASE_URL.to_string());
+        }
+
         // 1. 从 env 中获取
         if let Some(env) = provider.settings_config.get("env") {
             if let Some(url) = env.get("ANTHROPIC_BASE_URL").and_then(|v| v.as_str()) {
@@ -775,6 +794,15 @@ impl ProviderAdapter for ClaudeAdapter {
             return Some(AuthInfo::new(
                 "xai_oauth_placeholder".to_string(),
                 AuthStrategy::XaiOAuth,
+            ));
+        }
+
+        // CodeBuddy OAuth (腾讯云 CodeBuddy) 同样使用占位符
+        // 实际的 access_token 由 CodeBuddyOAuthManager 动态提供
+        if provider_type == ProviderType::CodeBuddyOAuth {
+            return Some(AuthInfo::new(
+                "codebuddy_oauth_placeholder".to_string(),
+                AuthStrategy::CodeBuddyOAuth,
             ));
         }
 
@@ -842,6 +870,20 @@ impl ProviderAdapter for ClaudeAdapter {
                 }
                 _ => format!("{}/responses", super::XAI_API_BASE_URL),
             };
+        }
+
+        // CodeBuddy OAuth: 所有请求统一走 /v2/chat/completions 端点。
+        // 注意：base_url 已被 forwarder 替换为账号的动态 endpoint。
+        // 这里不做 provider 检测，因为 build_url trait 不传 provider。
+        // 依赖 forwarder 在调用 build_url 之前已做检查：如果 is_codebuddy_oauth，
+        // 则使用 profile 的动态 base_url + /v2/chat/completions。
+        //
+        // 但由于 trait 签名不含 provider，这里对任何包含 codebuddy 特征
+        // 的 base_url 统一应用 /v2/chat/completions 规则。
+        if base_url.contains("codebuddy.ai") || base_url.contains("codebuddy.cn") {
+            let _ = endpoint;
+            let base = base_url.trim_end_matches('/');
+            return format!("{base}/v2/chat/completions");
         }
 
         // NOTE:
@@ -915,6 +957,14 @@ impl ProviderAdapter for ClaudeAdapter {
             AuthStrategy::XaiOAuth => {
                 vec![(HeaderName::from_static("authorization"), hv(&bearer)?)]
             }
+            AuthStrategy::CodeBuddyOAuth => {
+                // CodeBuddy headers are profile-aware and generated in forwarder.rs
+                // using the account's runtime profile (SaaS vs Enterprise).
+                // Here we emit a minimal placeholder set; the forwarder replaces
+                // them with the full profile-aware headers from
+                // codebuddy_oauth_auth::build_chat_headers.
+                vec![(HeaderName::from_static("authorization"), hv(&bearer)?)]
+            }
             AuthStrategy::GitHubCopilot => {
                 // 生成请求追踪 ID
                 let request_id = uuid::Uuid::new_v4().to_string();
@@ -977,6 +1027,11 @@ impl ProviderAdapter for ClaudeAdapter {
         }
 
         if self.is_xai_oauth(provider) {
+            return true;
+        }
+
+        // CodeBuddy OAuth 总是需要格式转换 (Anthropic → CodeBuddy Chat Completions)
+        if self.is_codebuddy_oauth(provider) {
             return true;
         }
 

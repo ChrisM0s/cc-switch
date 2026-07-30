@@ -135,6 +135,13 @@ pub enum AuthStrategy {
     ///
     /// access token 由 xAI Device Code 流程获取并由 forwarder 动态注入。
     XaiOAuth,
+
+    /// CodeBuddy OAuth（腾讯云 CodeBuddy）
+    ///
+    /// - Header: `Authorization: Bearer <access_token>`
+    ///
+    /// access token 是 CodeBuddy 登录后签发的 JWT，由 forwarder 动态注入。
+    CodeBuddyOAuth,
 }
 
 #[cfg(test)]
@@ -252,6 +259,8 @@ mod tests {
             AuthStrategy::GoogleOAuth,
             AuthStrategy::GitHubCopilot,
             AuthStrategy::CodexOAuth,
+            AuthStrategy::XaiOAuth,
+            AuthStrategy::CodeBuddyOAuth,
         ];
 
         for (i, s1) in strategies.iter().enumerate() {
