@@ -313,6 +313,28 @@ pub async fn start_config_server(
     let app = Router::new()
         .route("/", get(serve_form).post(handle_submit))
         .route("/cancel", post(handle_cancel))
+        .layer(
+            tower_http::cors::CorsLayer::new()
+                .allow_origin(tower_http::cors::AllowOrigin::predicate(
+                    |origin, _| {
+                        if let Ok(origin_str) = std::str::from_utf8(origin.as_bytes()) {
+                            origin_str.starts_with("http://127.0.0.1:")
+                                || origin_str.starts_with("http://localhost:")
+                        } else {
+                            false
+                        }
+                    },
+                ))
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::HeaderName::from_static("x-csrf-token"),
+                ])
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::OPTIONS,
+                ]),
+        )
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(BIND_ADDR).await?;
