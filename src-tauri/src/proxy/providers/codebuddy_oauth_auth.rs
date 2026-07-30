@@ -912,11 +912,22 @@ impl CodeBuddyOAuthManager {
             req = req.header(key, &value);
         }
 
+        log::debug!(
+            "[CodeBuddyOAuth] 轮询 /auth/token: GET {url}",
+        );
+
         let poll_response = req.send().await?;
 
-        if !poll_response.status().is_success() {
-            let status = poll_response.status();
+        let status = poll_response.status();
+        log::debug!(
+            "[CodeBuddyOAuth] /auth/token 响应: HTTP {status}",
+        );
+
+        if !status.is_success() {
             let text = poll_response.text().await.unwrap_or_default();
+            log::warn!(
+                "[CodeBuddyOAuth] /auth/token HTTP 错误: {status} body={text}"
+            );
             return Err(CodeBuddyOAuthError::TokenFetchFailed(format!(
                 "{status} - {text}"
             )));
@@ -925,13 +936,21 @@ impl CodeBuddyOAuthManager {
         let parsed: AuthTokenResponse = poll_response
             .json()
             .await
-            .map_err(|e| CodeBuddyOAuthError::ParseError(e.to_string()))?;
+            .map_err(|e| {
+                log::error!("[CodeBuddyOAuth] /auth/token JSON 解析失败: {e}");
+                CodeBuddyOAuthError::ParseError(e.to_string())
+            })?;
 
         if parsed.code == AUTH_PENDING_CODE {
+            log::debug!("[CodeBuddyOAuth] /auth/token: 等待用户授权中 (code=11217)");
             return Err(CodeBuddyOAuthError::AuthorizationPending);
         }
 
         if parsed.code != 0 {
+            log::warn!(
+                "[CodeBuddyOAuth] /auth/token 返回非零 code: {}",
+                parsed.code
+            );
             return Err(CodeBuddyOAuthError::TokenFetchFailed(format!(
                 "登录轮询返回错误码: {}",
                 parsed.code

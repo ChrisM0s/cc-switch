@@ -525,18 +525,42 @@ async fn call_upstream_auth_state(
         req = req.header(key, &value);
     }
 
-    let response = req.send().await.map_err(|e| e.to_string())?;
+    log::info!(
+        "[CodeBuddyOAuth] 正在请求上游 /auth/state: POST {url}",
+    );
+    log::debug!(
+        "[CodeBuddyOAuth] /auth/state 请求头: {:?}",
+        build_auth_start_headers(profile)
+    );
 
-    if !response.status().is_success() {
-        let status = response.status();
+    let response = req.send().await.map_err(|e| {
+        log::error!("[CodeBuddyOAuth] /auth/state 网络错误: {e}");
+        e.to_string()
+    })?;
+
+    let status = response.status();
+    log::info!(
+        "[CodeBuddyOAuth] /auth/state 响应: HTTP {status}",
+    );
+
+    if !status.is_success() {
         let text = response.text().await.unwrap_or_default();
+        log::error!("[CodeBuddyOAuth] /auth/state HTTP 错误: {status} body={text}");
         return Err(format!("HTTP {status}: {text}"));
     }
 
     let body: serde_json::Value = response
         .json()
         .await
-        .map_err(|e| format!("JSON 解析失败: {e}"))?;
+        .map_err(|e| {
+            log::error!("[CodeBuddyOAuth] /auth/state JSON 解析失败: {e}");
+            format!("JSON 解析失败: {e}")
+        })?;
+
+    log::debug!(
+        "[CodeBuddyOAuth] /auth/state 响应体: {}",
+        serde_json::to_string_pretty(&body).unwrap_or_default()
+    );
 
     let code = body.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
     if code != 0 {
