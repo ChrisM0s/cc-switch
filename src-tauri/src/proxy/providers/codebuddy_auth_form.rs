@@ -529,7 +529,7 @@ async fn handle_cancel(
 }
 
 /// 调用 CodeBuddy 站点的 /auth/state 获取上游 state + authUrl
-async fn call_upstream_auth_state(
+pub async fn call_upstream_auth_state(
     profile: &CodeBuddyAuthProfile,
 ) -> Result<(String, String), String> {
     let nonce = uuid::Uuid::new_v4().simple().to_string();

@@ -31,6 +31,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use super::codebuddy_auth_form::call_upstream_auth_state;
 use super::copilot_auth::{GitHubAccount, GitHubDeviceCodeResponse};
 
 // ============================================================================
@@ -789,61 +790,68 @@ impl CodeBuddyOAuthManager {
 
     // ==================== 登录流程 ====================
 
-    /// 启动登录流程（两阶段：本地配置 → 上游登录）
+    /// 使用指定 profile 启动 CodeBuddy 上游登录
     ///
-    /// 在 127.0.0.1:0 启动一次性配置页服务器，返回 flow_id 作为 device_code，
-    /// verification_uri 指向本地配置页。
-    pub async fn start_device_flow(
+    /// 直接调用 /v2/plugin/auth/state，将 profile 与 upstream state 绑定到 pending flow，
+    /// 返回 authUrl 供浏览器打开。
+    pub async fn start_device_flow_with_profile(
         &self,
+        profile: CodeBuddyAuthProfile,
     ) -> Result<GitHubDeviceCodeResponse, CodeBuddyOAuthError> {
-        log::info!("[CodeBuddyOAuth] 启动登录流程（本地配置模式）");
-
-        // 生成 flow ID 和 CSRF token
-        let flow_id = uuid::Uuid::new_v4().simple().to_string();
-        let csrf_token = uuid::Uuid::new_v4().simple().to_string();
-        let expires_in = CONFIG_SERVER_TIMEOUT_SECS;
-        let expires_at_ms =
-            chrono::Utc::now().timestamp_millis() + (expires_in as i64) * 1000;
+        log::info!(
+            "[CodeBuddyOAuth] 启动登录流程: site_type={}, endpoint={}",
+            profile.site_type,
+            profile.api_endpoint
+        );
 
         // 清理过期 flow
         {
             let mut flows = self.pending_flows.write().await;
             let now_ms = chrono::Utc::now().timestamp_millis();
             flows.retain(|_, flow| flow.expires_at_ms() > now_ms);
+        }
+
+        // 调用上游 /auth/state
+        let (upstream_state, auth_url) = call_upstream_auth_state(&profile).await
+            .map_err(CodeBuddyOAuthError::TokenFetchFailed)?;
+
+        let flow_id = uuid::Uuid::new_v4().simple().to_string();
+        let expires_in = AUTH_STATE_DEFAULT_EXPIRES_IN;
+        let expires_at_ms =
+            chrono::Utc::now().timestamp_millis() + (expires_in as i64) * 1000;
+
+        {
+            let mut flows = self.pending_flows.write().await;
             flows.insert(
                 flow_id.clone(),
-                PendingFlow::AwaitingConfiguration {
+                PendingFlow::AwaitingAuthorization {
                     expires_at_ms,
-                    csrf_token: csrf_token.clone(),
+                    upstream_state,
+                    profile,
                 },
             );
         }
 
-        // 启动本地配置页服务器
-        let port = crate::proxy::providers::codebuddy_auth_form::start_config_server(
-            flow_id.clone(),
-            csrf_token,
-            self.pending_flows.clone(),
-            expires_at_ms,
-        )
-        .await
-        .map_err(|e| {
-            CodeBuddyOAuthError::NetworkError(format!("无法启动本地配置服务器: {e}"))
-        })?;
-
-        let verification_uri = format!("http://127.0.0.1:{port}/?flow={flow_id}");
-
         log::info!(
-            "[CodeBuddyOAuth] 本地配置页已启动: {verification_uri}"
+            "[CodeBuddyOAuth] 上游 state 获取成功，返回 authUrl"
         );
 
         Ok(GitHubDeviceCodeResponse {
             device_code: flow_id.clone(),
             user_code: flow_id,
-            verification_uri,
+            verification_uri: auth_url,
             expires_in,
             interval: 5 + POLLING_SAFETY_MARGIN_SECS,
         })
+    }
+
+    /// 启动登录流程（兼容旧接口：默认国际站）
+    #[allow(dead_code)]
+    pub async fn start_device_flow(
+        &self,
+    ) -> Result<GitHubDeviceCodeResponse, CodeBuddyOAuthError> {
+        self.start_device_flow_with_profile(CodeBuddyAuthProfile::international())
+            .await
     }
 
     /// 轮询登录状态（以 flow_id 为 key）
