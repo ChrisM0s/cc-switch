@@ -15,7 +15,8 @@ export type ClaudeDesktopApiFormat =
   | "anthropic"
   | "openai_chat"
   | "openai_responses"
-  | "gemini_native";
+  | "gemini_native"
+  | "codebuddy";
 
 export interface ClaudeDesktopRoutePreset {
   routeId: string;
@@ -814,6 +815,19 @@ export const claudeDesktopProviderPresets: ClaudeDesktopProviderPreset[] = [
     modelRoutes: brandedRoutes("grok-4.5", "grok-4.5", "grok-4.5"),
     icon: "xai",
     iconColor: "#000000",
+  },
+  {
+    name: "CodeBuddy",
+    websiteUrl: "https://www.codebuddy.ai",
+    category: "third_party",
+    baseUrl: "https://www.codebuddy.ai",
+    mode: "proxy",
+    apiFormat: "codebuddy",
+    providerType: "codebuddy_oauth",
+    requiresOAuth: true,
+    modelRoutes: brandedRoutes("auto-chat", "auto-chat", "auto-chat"),
+    icon: "codebuddy",
+    iconColor: "#16A34A",
   },
   {
     name: "DeepSeek",

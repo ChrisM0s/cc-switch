@@ -55,7 +55,8 @@ export interface ProviderPreset {
     | "anthropic"
     | "openai_chat"
     | "openai_responses"
-    | "gemini_native";
+    | "gemini_native"
+    | "codebuddy";
 
   // 供应商类型标识（用于特殊供应商检测）
   // - "github_copilot": GitHub Copilot 供应商（需要 OAuth 认证）
@@ -1301,6 +1302,27 @@ export const providerPresets: ProviderPreset[] = [
     requiresOAuth: true,
     icon: "xai",
     iconColor: "#000000",
+  },
+  {
+    name: "CodeBuddy",
+    websiteUrl: "https://www.codebuddy.ai",
+    settingsConfig: {
+      env: {
+        // base_url 由代理后端按绑定账号的站点档案动态重写
+        // (codebuddy.ai / codebuddy.cn / 企业自定义端点)
+        ANTHROPIC_BASE_URL: "https://www.codebuddy.ai",
+        ANTHROPIC_MODEL: "auto-chat",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "auto-chat",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "auto-chat",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "auto-chat",
+      },
+    },
+    category: "third_party",
+    apiFormat: "codebuddy",
+    providerType: "codebuddy_oauth",
+    requiresOAuth: true,
+    icon: "codebuddy",
+    iconColor: "#16A34A",
   },
   {
     name: "Nvidia",

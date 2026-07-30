@@ -199,7 +199,8 @@ export interface ProviderMeta {
     | "anthropic"
     | "openai_chat"
     | "openai_responses"
-    | "gemini_native";
+    | "gemini_native"
+    | "codebuddy";
   // 通用认证绑定
   authBinding?: AuthBinding;
   // Claude 认证字段名
@@ -248,7 +249,8 @@ export type ClaudeApiFormat =
   | "anthropic"
   | "openai_chat"
   | "openai_responses"
-  | "gemini_native";
+  | "gemini_native"
+  | "codebuddy";
 
 // Codex API 格式类型
 // - "openai_responses": OpenAI Responses API 格式，直接透传
