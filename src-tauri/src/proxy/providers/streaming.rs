@@ -514,7 +514,13 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                         // 注意：OpenRouter 某些 provider 会发送多个带 finish_reason 的 chunk
                                         // （第一个 usage 为 null，后续才补全）。此处只做缓存，不立即发送，
                                         // 等到 [DONE] 或流末尾再统一发出，确保 usage 完整且只发一次。
-                                        if let Some(finish_reason) = &choice.finish_reason {
+                                        // CodeBuddy 企业版会在中间 chunk 发空 finish_reason ""，
+                                        // 过滤掉避免不必要的 content_block_stop/start 循环。
+                                        let effective_finish_reason = choice
+                                            .finish_reason
+                                            .as_deref()
+                                            .filter(|r| !r.is_empty());
+                                        if let Some(finish_reason) = effective_finish_reason {
                                             let stop_reason = map_stop_reason(Some(finish_reason));
                                             let usage_json =
                                                 chunk_usage_json.clone().or_else(|| latest_usage.clone());

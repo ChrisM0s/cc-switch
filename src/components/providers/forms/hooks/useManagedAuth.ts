@@ -6,6 +6,7 @@ import type {
   ManagedAuthProvider,
   ManagedAuthStatus,
   ManagedAuthDeviceCodeResponse,
+  CodeBuddyAuthOptions,
 } from "@/lib/api";
 
 type PollingState = "idle" | "polling" | "success" | "error";
@@ -59,7 +60,8 @@ export function useManagedAuth(
   }, [stopPolling]);
 
   const startLoginMutation = useMutation({
-    mutationFn: () => authApi.authStartLogin(authProvider, githubDomain),
+    mutationFn: (codebuddyOptions?: CodeBuddyAuthOptions) =>
+      authApi.authStartLogin(authProvider, githubDomain, codebuddyOptions),
     onSuccess: async (response) => {
       setDeviceCode(response);
       setPollingState("polling");
@@ -186,8 +188,19 @@ export function useManagedAuth(
     setDeviceCode(null);
     setError(null);
     stopPolling();
-    startLoginMutation.mutate();
+    startLoginMutation.mutate(undefined);
   }, [startLoginMutation, stopPolling]);
+
+  const startAuthWithCodebuddyOptions = useCallback(
+    (codebuddyOptions: CodeBuddyAuthOptions) => {
+      setPollingState("idle");
+      setDeviceCode(null);
+      setError(null);
+      stopPolling();
+      startLoginMutation.mutate(codebuddyOptions);
+    },
+    [startLoginMutation, stopPolling],
+  );
 
   const cancelAuth = useCallback(() => {
     stopPolling();
@@ -232,6 +245,7 @@ export function useManagedAuth(
     isRemovingAccount: removeAccountMutation.isPending,
     isSettingDefaultAccount: setDefaultAccountMutation.isPending,
     startAuth,
+    startAuthWithCodebuddyOptions,
     addAccount: startAuth,
     cancelAuth,
     logout,

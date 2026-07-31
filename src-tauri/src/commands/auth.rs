@@ -4,7 +4,9 @@ use crate::commands::codex_oauth::CodexOAuthState;
 use crate::commands::copilot::CopilotAuthState;
 use crate::commands::xai_oauth::XaiOAuthState;
 use crate::commands::CodeBuddyOAuthState;
-use crate::proxy::providers::codebuddy_oauth_auth::CodeBuddyOAuthError;
+use crate::proxy::providers::codebuddy_oauth_auth::{
+    CodeBuddyAuthProfile, CodeBuddyOAuthError,
+};
 use crate::proxy::providers::codex_oauth_auth::CodexOAuthError;
 use crate::proxy::providers::copilot_auth::{
     CopilotAuthError, GitHubAccount, GitHubDeviceCodeResponse,
@@ -108,6 +110,10 @@ fn map_device_code_response(
 pub async fn auth_start_login(
     auth_provider: String,
     github_domain: Option<String>,
+    codebuddy_site_type: Option<String>,
+    codebuddy_api_endpoint: Option<String>,
+    codebuddy_enterprise_id: Option<String>,
+    codebuddy_user_agent: Option<String>,
     copilot_state: State<'_, CopilotAuthState>,
     codex_state: State<'_, CodexOAuthState>,
     xai_state: State<'_, XaiOAuthState>,
@@ -141,8 +147,27 @@ pub async fn auth_start_login(
         }
         AUTH_PROVIDER_CODEBUDDY_OAUTH => {
             let auth_manager = codebuddy_state.0.read().await;
+            let profile = match codebuddy_site_type.as_deref() {
+                Some("china") => CodeBuddyAuthProfile::china(),
+                Some("enterprise") => {
+                    let endpoint = codebuddy_api_endpoint
+                        .as_deref()
+                        .unwrap_or("https://www.codebuddy.ai");
+                    let enterprise_id = codebuddy_enterprise_id
+                        .as_deref()
+                        .unwrap_or("");
+                    let user_agent = codebuddy_user_agent.clone();
+                    CodeBuddyAuthProfile::enterprise(
+                        endpoint.to_string(),
+                        enterprise_id.to_string(),
+                        user_agent,
+                    )
+                    .map_err(|e| e.to_string())?
+                }
+                _ => CodeBuddyAuthProfile::international(),
+            };
             let response = auth_manager
-                .start_device_flow()
+                .start_device_flow_with_profile(profile)
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(map_device_code_response(auth_provider, response))

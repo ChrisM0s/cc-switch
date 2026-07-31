@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import {
@@ -53,12 +54,31 @@ export const CodeBuddyOAuthSection: React.FC<CodeBuddyOAuthSectionProps> = ({
     isAddingAccount,
     isRemovingAccount,
     isSettingDefaultAccount,
-    addAccount,
+    startAuthWithCodebuddyOptions,
     removeAccount,
     setDefaultAccount,
     cancelAuth,
     logout,
   } = useCodeBuddyOauth();
+
+  const [siteType, setSiteType] = useState<
+    "international" | "china" | "enterprise"
+  >("international");
+  const [apiEndpoint, setApiEndpoint] = useState("");
+  const [enterpriseId, setEnterpriseId] = useState("");
+  const [userAgent, setUserAgent] = useState("");
+
+  const handleAddAccount = () => {
+    startAuthWithCodebuddyOptions({
+      siteType,
+      apiEndpoint:
+        siteType === "enterprise" ? apiEndpoint : undefined,
+      enterpriseId:
+        siteType === "enterprise" ? enterpriseId : undefined,
+      userAgent:
+        siteType === "enterprise" && userAgent ? userAgent : undefined,
+    });
+  };
 
   const handleAccountSelect = (value: string) => {
     onAccountSelect?.(value === "none" ? null : value);
@@ -185,13 +205,109 @@ export const CodeBuddyOAuthSection: React.FC<CodeBuddyOAuthSectionProps> = ({
         </div>
       )}
 
+      {/* 站点类型选择 */}
+      {pollingState === "idle" && (
+        <div className="space-y-3">
+          <Label>{t("codebuddyOauth.selectSite", "选择站点")}</Label>
+          <div className="grid grid-cols-3 gap-2">
+            {(["international", "china", "enterprise"] as const).map(
+              (type) => {
+                const labels: Record<string, string> = {
+                  international: t(
+                    "codebuddyOauth.international",
+                    "国际站",
+                  ),
+                  china: t("codebuddyOauth.china", "中国站"),
+                  enterprise: t("codebuddyOauth.enterprise", "企业版"),
+                };
+                const hints: Record<string, string> = {
+                  international: "codebuddy.ai",
+                  china: "codebuddy.cn",
+                  enterprise: "自托管",
+                };
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() =>
+                      setSiteType(type)}
+                    className={`p-2 rounded-md border text-center text-sm transition-colors ${
+                      siteType === type
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300"
+                        : "border-border hover:border-muted-foreground/50"
+                    }`}
+                  >
+                    <div className="font-medium">{labels[type]}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {hints[type]}
+                    </div>
+                  </button>
+                );
+              },
+            )}
+          </div>
+
+          {/* 企业版额外字段 */}
+          {siteType === "enterprise" && (
+            <div className="space-y-2 p-3 rounded-md border bg-muted/30">
+              <div>
+                <Label className="text-xs">
+                  {t(
+                    "codebuddyOauth.apiEndpoint",
+                    "API 端点",
+                  )}
+                </Label>
+                <Input
+                  placeholder="https://your-enterprise.copilot.example.com"
+                  value={apiEndpoint}
+                  onChange={(e) => setApiEndpoint(e.target.value)}
+                  className="h-8 text-sm mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">
+                  {t("codebuddyOauth.enterpriseId", "企业标识")}
+                </Label>
+                <Input
+                  placeholder={t(
+                    "codebuddyOauth.enterpriseIdPlaceholder",
+                    "如: your-company",
+                  )}
+                  value={enterpriseId}
+                  onChange={(e) => setEnterpriseId(e.target.value)}
+                  className="h-8 text-sm mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">
+                  {t(
+                    "codebuddyOauth.userAgent",
+                    "User-Agent (可选)",
+                  )}
+                </Label>
+                <Input
+                  placeholder="CodeBuddyIDE/4.2.22590715"
+                  value={userAgent}
+                  onChange={(e) => setUserAgent(e.target.value)}
+                  className="h-8 text-sm mt-1"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 未认证 - 登录按钮 */}
       {!hasAnyAccount && pollingState === "idle" && (
         <Button
           type="button"
-          onClick={addAccount}
+          onClick={handleAddAccount}
           className="w-full"
           variant="outline"
+          disabled={
+            siteType === "enterprise" &&
+            (!apiEndpoint.trim() || !enterpriseId.trim())
+          }
         >
           <Sparkles className="mr-2 h-4 w-4" />
           {t("codebuddyOauth.loginWithCodeBuddy", "选择站点并登录 CodeBuddy")}
@@ -202,10 +318,14 @@ export const CodeBuddyOAuthSection: React.FC<CodeBuddyOAuthSectionProps> = ({
       {hasAnyAccount && pollingState === "idle" && (
         <Button
           type="button"
-          onClick={addAccount}
+          onClick={handleAddAccount}
           className="w-full"
           variant="outline"
-          disabled={isAddingAccount}
+          disabled={
+            isAddingAccount ||
+            (siteType === "enterprise" &&
+              (!apiEndpoint.trim() || !enterpriseId.trim()))
+          }
         >
           <Plus className="mr-2 h-4 w-4" />
           {t("codebuddyOauth.addAnotherAccount", "添加其他 CodeBuddy 账号")}
@@ -258,7 +378,7 @@ export const CodeBuddyOAuthSection: React.FC<CodeBuddyOAuthSectionProps> = ({
           <div className="flex gap-2">
             <Button
               type="button"
-              onClick={addAccount}
+              onClick={handleAddAccount}
               variant="outline"
               size="sm"
             >

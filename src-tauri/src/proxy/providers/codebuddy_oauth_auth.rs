@@ -470,9 +470,6 @@ pub fn build_chat_headers(
 ) -> Vec<(&'static str, String)> {
     let host = profile.host();
     let request_id = uuid::Uuid::new_v4().simple().to_string();
-    let conversation_id = uuid::Uuid::new_v4().to_string();
-    let conversation_request_id = uuid::Uuid::new_v4().simple().to_string()[..16].to_string();
-    let conversation_message_id = uuid::Uuid::new_v4().to_string().replace('-', "");
 
     let mut headers: Vec<(&'static str, String)> = vec![
         ("Host", host.to_string()),
@@ -483,18 +480,7 @@ pub fn build_chat_headers(
         ),
         ("X-Domain", host.to_string()),
         ("X-Product", profile.product_header().to_string()),
-        ("X-Request-ID", request_id.clone()),
-        ("X-Conversation-ID", conversation_id),
-        (
-            "X-Conversation-Request-ID",
-            conversation_request_id,
-        ),
-        (
-            "X-Conversation-Message-ID",
-            conversation_message_id,
-        ),
         ("X-User-Id", user_id.to_string()),
-        ("X-Agent-Intent", "craft".to_string()),
     ];
 
     if profile.site_type.is_enterprise() {
@@ -515,12 +501,19 @@ pub fn build_chat_headers(
             "User-Agent",
             profile.effective_user_agent().to_string(),
         ));
-        headers.push((
-            "X-Request-Trace-Id",
-            request_id,
-        ));
+        headers.push(("X-Request-Trace-Id", request_id));
     } else {
+        let conversation_id = uuid::Uuid::new_v4().to_string();
+        let conversation_request_id =
+            uuid::Uuid::new_v4().simple().to_string()[..16].to_string();
+        let conversation_message_id =
+            uuid::Uuid::new_v4().to_string().replace('-', "");
         headers.push(("Content-Type", "application/json".to_string()));
+        headers.push(("X-Request-ID", request_id.clone()));
+        headers.push(("X-Conversation-ID", conversation_id));
+        headers.push(("X-Conversation-Request-ID", conversation_request_id));
+        headers.push(("X-Conversation-Message-ID", conversation_message_id));
+        headers.push(("X-Agent-Intent", "craft".to_string()));
         headers.push(("X-Requested-With", "XMLHttpRequest".to_string()));
         headers.push(("x-stainless-arch", "x64".to_string()));
         headers.push(("x-stainless-lang", "js".to_string()));
@@ -905,8 +898,8 @@ impl CodeBuddyOAuthManager {
         profile: &CodeBuddyAuthProfile,
     ) -> Result<Option<GitHubAccount>, CodeBuddyOAuthError> {
         let url = format!(
-            "{}v2/plugin/auth/token?state={upstream_state}",
-            profile.api_endpoint
+            "{}/v2/plugin/auth/token?state={upstream_state}",
+            profile.api_endpoint.trim_end_matches('/')
         );
 
         log::debug!(

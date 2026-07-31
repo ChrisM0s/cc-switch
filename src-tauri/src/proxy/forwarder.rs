@@ -1132,6 +1132,49 @@ impl RequestForwarder {
         // 使用适配器提取 base_url
         let mut base_url = adapter.extract_base_url(provider)?;
 
+        // CodeBuddy OAuth 动态 endpoint 路由
+        // 必须在 URL 构建之前解析运行时凭证，否则请求会发到默认的 codebuddy.ai
+        // 而不是企业版的 coipliot 端点。
+        if provider.is_codebuddy_oauth() {
+            if let Some(app_handle) = &self.app_handle {
+                let codebuddy_state = app_handle.state::<CodeBuddyOAuthState>();
+                let codebuddy_auth = codebuddy_state.0.read().await;
+                let account_id = provider
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.managed_account_id_for("codebuddy_oauth"));
+                let runtime_result = match &account_id {
+                    Some(id) => codebuddy_auth.get_runtime_auth_for_account(id).await,
+                    None => codebuddy_auth.get_runtime_auth().await,
+                };
+                match runtime_result {
+                    Ok(runtime_auth) => {
+                        let dynamic_endpoint =
+                            runtime_auth.profile.api_endpoint.trim_end_matches('/');
+                        if dynamic_endpoint != base_url {
+                            log::debug!(
+                                "[CodeBuddyOAuth] 使用动态 API endpoint: {} (原: {})",
+                                dynamic_endpoint,
+                                base_url
+                            );
+                            base_url = dynamic_endpoint.to_string();
+                        }
+                        codebuddy_runtime_auth = Some(runtime_auth);
+                    }
+                    Err(error) => {
+                        log::error!("[CodeBuddyOAuth] 获取运行时凭证失败: {error}");
+                        return Err(ProxyError::AuthError(format!(
+                            "CodeBuddy OAuth 认证失败: {error}"
+                        )));
+                    }
+                }
+            } else {
+                return Err(ProxyError::AuthError(
+                    "CodeBuddy OAuth 认证不可用（无 AppHandle）".to_string(),
+                ));
+            }
+        }
+
         let is_full_url = provider
             .meta
             .as_ref()
@@ -1300,20 +1343,6 @@ impl RequestForwarder {
             None
         };
 
-        // CodeBuddy OAuth 动态 endpoint 路由 — 上方的 codebuddy_runtime_auth
-        // Option 已在作用域顶部声明（在 auth_headers 块之前）。
-        if let Some(ref runtime_auth) = codebuddy_runtime_auth {
-            let dynamic_endpoint = runtime_auth.profile.api_endpoint.trim_end_matches('/');
-            if dynamic_endpoint != base_url {
-                log::debug!(
-                    "[CodeBuddyOAuth] 使用动态 API endpoint: {} (原: {})",
-                    dynamic_endpoint,
-                    base_url
-                );
-                base_url = dynamic_endpoint.to_string();
-            }
-        }
-
         // GitHub Copilot 动态 endpoint 路由
         // 从 CopilotAuthManager 获取缓存的 API endpoint（支持企业版等非默认 endpoint）
         if is_copilot && !is_full_url {
@@ -1344,7 +1373,7 @@ impl RequestForwarder {
             }
         }
 
-        // CodeBuddy OAuth 动态 endpoint 路由 — 已在上方 auth_headers 块之后执行
+        // CodeBuddy OAuth 动态 endpoint 路由 — 已在上方 base_url 提取时执行
         let resolved_claude_api_format = if adapter.name() == "Claude" {
             Some(
                 self.resolve_claude_api_format(provider, &mapped_body, is_copilot)
@@ -1407,6 +1436,15 @@ impl RequestForwarder {
         // exact endpoint suffix, so prefixed gateways like `.../api/v1/messages` are covered.
         let codex_anthropic_base_is_full_endpoint =
             codex_responses_to_anthropic && base_url_is_full_endpoint(&base_url, "/v1/messages");
+
+        // CodeBuddy OAuth: force /v2/chat/completions regardless of the original endpoint.
+        // The ClaudeAdapter::build_url only maps codebuddy.ai/codebuddy.cn → /v2/chat/completions,
+        // but enterprise endpoints like h3c.copilot.qq.com don't match that check.
+        let effective_endpoint = if provider.is_codebuddy_oauth() {
+            "/v2/chat/completions".to_string()
+        } else {
+            effective_endpoint
+        };
 
         let url = if matches!(resolved_claude_api_format.as_deref(), Some("gemini_native")) {
             super::gemini_url::resolve_gemini_native_url(
@@ -1779,42 +1817,47 @@ impl RequestForwarder {
             // CodeBuddy OAuth: 从 CodeBuddyOAuthManager 获取完整运行时凭证。
             // 无 refresh 机制，token 过期时直接返回错误，提示用户重新登录。
             // 需要同时获取 token、user_id 和 profile，用于动态 base_url 和 headers。
+            // 如果已在上方动态 endpoint 路由阶段解析过，直接复用。
             if auth.strategy == AuthStrategy::CodeBuddyOAuth {
-                if let Some(app_handle) = &self.app_handle {
-                    let codebuddy_state = app_handle.state::<CodeBuddyOAuthState>();
-                    let codebuddy_auth: tokio::sync::RwLockReadGuard<'_, CodeBuddyOAuthManager> =
-                        codebuddy_state.0.read().await;
-                    let account_id = provider
-                        .meta
-                        .as_ref()
-                        .and_then(|meta| meta.managed_account_id_for("codebuddy_oauth"));
-                    let runtime_result = match &account_id {
-                        Some(id) => codebuddy_auth.get_runtime_auth_for_account(id).await,
-                        None => codebuddy_auth.get_runtime_auth().await,
-                    };
-                    match runtime_result {
-                        Ok(runtime_auth) => {
-                            log::debug!(
-                                "[CodeBuddyOAuth] 成功获取运行时凭证 (account={})",
-                                account_id.as_deref().unwrap_or("default")
-                            );
-                            auth = AuthInfo::new(
-                                runtime_auth.access_token.clone(),
-                                AuthStrategy::CodeBuddyOAuth,
-                            );
-                            codebuddy_runtime_auth = Some(runtime_auth);
+                if codebuddy_runtime_auth.is_none() {
+                    if let Some(app_handle) = &self.app_handle {
+                        let codebuddy_state = app_handle.state::<CodeBuddyOAuthState>();
+                        let codebuddy_auth: tokio::sync::RwLockReadGuard<'_, CodeBuddyOAuthManager> =
+                            codebuddy_state.0.read().await;
+                        let account_id = provider
+                            .meta
+                            .as_ref()
+                            .and_then(|meta| meta.managed_account_id_for("codebuddy_oauth"));
+                        let runtime_result = match &account_id {
+                            Some(id) => codebuddy_auth.get_runtime_auth_for_account(id).await,
+                            None => codebuddy_auth.get_runtime_auth().await,
+                        };
+                        match runtime_result {
+                            Ok(runtime_auth) => {
+                                log::debug!(
+                                    "[CodeBuddyOAuth] 成功获取运行时凭证 (account={})",
+                                    account_id.as_deref().unwrap_or("default")
+                                );
+                                codebuddy_runtime_auth = Some(runtime_auth);
+                            }
+                            Err(error) => {
+                                log::error!("[CodeBuddyOAuth] 获取运行时凭证失败: {error}");
+                                return Err(ProxyError::AuthError(format!(
+                                    "CodeBuddy OAuth 认证失败: {error}"
+                                )));
+                            }
                         }
-                        Err(error) => {
-                            log::error!("[CodeBuddyOAuth] 获取运行时凭证失败: {error}");
-                            return Err(ProxyError::AuthError(format!(
-                                "CodeBuddy OAuth 认证失败: {error}"
-                            )));
-                        }
+                    } else {
+                        return Err(ProxyError::AuthError(
+                            "CodeBuddy OAuth 认证不可用（无 AppHandle）".to_string(),
+                        ));
                     }
-                } else {
-                    return Err(ProxyError::AuthError(
-                        "CodeBuddy OAuth 认证不可用（无 AppHandle）".to_string(),
-                    ));
+                }
+                if let Some(ref runtime_auth) = codebuddy_runtime_auth {
+                    auth = AuthInfo::new(
+                        runtime_auth.access_token.clone(),
+                        AuthStrategy::CodeBuddyOAuth,
+                    );
                 }
             } else {
                 codebuddy_runtime_auth = None;
@@ -1830,20 +1873,6 @@ impl RequestForwarder {
         } else {
             Vec::new()
         };
-
-        // CodeBuddy OAuth 动态 endpoint 路由
-        // 必须在 auth resolution 之后执行（codebuddy_runtime_auth 在上方 auth block 中赋值）
-        if let Some(ref runtime_auth) = codebuddy_runtime_auth {
-            let dynamic_endpoint = runtime_auth.profile.api_endpoint.trim_end_matches('/');
-            if dynamic_endpoint != base_url {
-                log::debug!(
-                    "[CodeBuddyOAuth] 使用动态 API endpoint: {} (原: {})",
-                    dynamic_endpoint,
-                    base_url
-                );
-                base_url = dynamic_endpoint.to_string();
-            }
-        }
 
         // 注入 Codex OAuth 的 ChatGPT-Account-Id header（如果有 account_id）
         if let Some(ref account_id) = codex_oauth_account_id {
@@ -2258,6 +2287,16 @@ impl RequestForwarder {
             is_copilot,
         );
 
+        // CodeBuddy OAuth: 完全用 auth_headers 重建 ordered_headers，
+        // 消除所有客户端 header 泄漏和重复。CodeBuddy chat headers 已包含
+        // 完整的上游请求头集合（Host, Accept, Content-Type, User-Agent 等）。
+        if provider.is_codebuddy_oauth() && !auth_headers.is_empty() {
+            ordered_headers.clear();
+            for (ah_name, ah_value) in &auth_headers {
+                ordered_headers.append(ah_name.clone(), ah_value.clone());
+            }
+        }
+
         reject_proxy_placeholder_for_managed_account_upstream(&url, &ordered_headers)?;
 
         // 日志目标 URL 的脱敏分两种情形：
@@ -2278,6 +2317,17 @@ impl RequestForwarder {
             .and_then(|v| v.as_str())
             .unwrap_or("<none>");
         log::info!("[{tag}] >>> 请求目标: {target_for_log} (model={request_model})");
+        log::info!("[{tag}] >>> 请求方法: {method}");
+        log::info!("[{tag}] >>> Content-Length: {}", body_bytes.len());
+        for (name, value) in ordered_headers.iter() {
+            // Redact Authorization header
+            let display_value = if name.as_str().eq_ignore_ascii_case("authorization") {
+                "Bearer ***REDACTED***"
+            } else {
+                value.to_str().unwrap_or("<non-utf8>")
+            };
+            log::info!("[{tag}] >>> 请求头: {name}: {display_value}");
+        }
         log::debug!(
             "[{tag}] >>> 请求体已准备: bytes={}, hash={} (content omitted)",
             body_bytes.len(),

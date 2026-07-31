@@ -34,13 +34,25 @@ export interface ManagedAuthDeviceCodeResponse {
   interval: number;
 }
 
+export interface CodeBuddyAuthOptions {
+  siteType?: "international" | "china" | "enterprise";
+  apiEndpoint?: string;
+  enterpriseId?: string;
+  userAgent?: string;
+}
+
 export async function authStartLogin(
   authProvider: ManagedAuthProvider,
   githubDomain?: string,
+  codebuddyOptions?: CodeBuddyAuthOptions,
 ): Promise<ManagedAuthDeviceCodeResponse> {
   return invoke<ManagedAuthDeviceCodeResponse>("auth_start_login", {
     authProvider,
     githubDomain: githubDomain || null,
+    codebuddySiteType: codebuddyOptions?.siteType || null,
+    codebuddyApiEndpoint: codebuddyOptions?.apiEndpoint || null,
+    codebuddyEnterpriseId: codebuddyOptions?.enterpriseId || null,
+    codebuddyUserAgent: codebuddyOptions?.userAgent || null,
   });
 }
 

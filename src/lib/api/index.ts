@@ -29,4 +29,5 @@ export type {
   ManagedAuthAccount,
   ManagedAuthStatus,
   ManagedAuthDeviceCodeResponse,
+  CodeBuddyAuthOptions,
 } from "./auth";

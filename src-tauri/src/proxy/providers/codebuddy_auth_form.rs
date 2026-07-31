@@ -534,8 +534,8 @@ pub async fn call_upstream_auth_state(
 ) -> Result<(String, String), String> {
     let nonce = uuid::Uuid::new_v4().simple().to_string();
     let url = format!(
-        "{}v2/plugin/auth/state?platform=VSCode&nonce={nonce}",
-        profile.api_endpoint
+        "{}/v2/plugin/auth/state?platform=VSCode&nonce={nonce}",
+        profile.api_endpoint.trim_end_matches('/')
     );
 
     let mut req = crate::proxy::http_client::get()
