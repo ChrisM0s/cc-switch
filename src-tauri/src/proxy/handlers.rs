@@ -419,7 +419,10 @@ async fn handle_claude_transform(
                 tool_schema_hints.clone(),
             )))
         } else {
-            Box::new(Box::pin(create_anthropic_sse_stream(stream)))
+            Box::new(Box::pin(create_anthropic_sse_stream(
+                stream,
+                api_format == "codebuddy",
+            )))
         };
 
         // 创建使用量收集器；关闭 usage logging 时不要再解析转换后的 SSE。

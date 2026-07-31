@@ -148,6 +148,7 @@ fn build_message_delta_event(stop_reason: Option<String>, usage_json: Option<Val
 /// 创建 Anthropic SSE 流
 pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
+    skip_reasoning: bool,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     async_stream::stream! {
         let mut buffer = String::new();
@@ -170,6 +171,10 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
         let mut current_non_tool_block_index: Option<u32> = None;
         let mut tool_blocks_by_index: HashMap<usize, ToolBlockState> = HashMap::new();
         let mut open_tool_block_indices: HashSet<u32> = HashSet::new();
+        // CodeBuddy 逐字符发送 text chunk，Claude Code 在 delta 间会插入视觉空格。
+        // 累积文本凑足阈值再发送，避免显示异常。非 CodeBuddy 不缓冲（正常 chunk 已够大）。
+        let mut text_buffer: String = String::new();
+        const TEXT_FLUSH_CHARS: usize = 20;
 
         tokio::pin!(stream);
 
@@ -189,6 +194,23 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                     log::debug!("[Claude/OpenRouter] <<< OpenAI SSE: [DONE]");
 
                                     // 流正常结束，发出缓存的 message_delta（含完整 usage）。
+                                    // CodeBuddy: flush 可能残留的 text buffer
+                                    if skip_reasoning && !text_buffer.is_empty() {
+                                        if let Some(index) = current_non_tool_block_index {
+                                            let content = std::mem::take(&mut text_buffer);
+                                            let event = json!({
+                                                "type": "content_block_delta",
+                                                "index": index,
+                                                "delta": {
+                                                    "type": "text_delta",
+                                                    "text": content
+                                                }
+                                            });
+                                            let sse_data = format!("event: content_block_delta\ndata: {}\n\n",
+                                                serde_json::to_string(&event).unwrap_or_default());
+                                            yield Ok(Bytes::from(sse_data));
+                                        }
+                                    }
                                     if let Some((stop_reason, usage_json)) = pending_message_delta.take() {
                                         let event = build_message_delta_event(stop_reason, usage_json);
                                         let sse_data = format!("event: message_delta\ndata: {}\n\n",
@@ -267,7 +289,11 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                         }
 
                                         // 处理 reasoning（thinking）
-                                        if let Some(reasoning) = &choice.delta.reasoning {
+                                        if skip_reasoning {
+                                            // CodeBuddy 等上游的 reasoning_content 与 Anthropic thinking 块
+                                            // 语义不同，且逐字交替 thinking/text 导致 content_block_stop/start
+                                            // 循环，直接丢弃 reasoning 内容。
+                                        } else if let Some(reasoning) = &choice.delta.reasoning {
                                             if current_non_tool_block_type != Some("thinking") {
                                                 if let Some(index) = current_non_tool_block_index.take() {
                                                     let event = json!({
@@ -313,47 +339,109 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                         // 处理文本内容
                                         if let Some(content) = &choice.delta.content {
                                             if !content.is_empty() {
-                                                if current_non_tool_block_type != Some("text") {
-                                                    if let Some(index) = current_non_tool_block_index.take() {
+                                                if skip_reasoning {
+                                                    // CodeBuddy 模式：累积文本，凑足阈值再发，
+                                                    // 避免 Claude Code 在逐字符 delta 间插入视觉空格。
+                                                    text_buffer.push_str(content);
+                                                } else {
+                                                    if current_non_tool_block_type != Some("text") {
+                                                        if let Some(index) = current_non_tool_block_index.take() {
+                                                            let event = json!({
+                                                                "type": "content_block_stop",
+                                                                "index": index
+                                                            });
+                                                            let sse_data = format!("event: content_block_stop\ndata: {}\n\n",
+                                                                serde_json::to_string(&event).unwrap_or_default());
+                                                            yield Ok(Bytes::from(sse_data));
+                                                        }
+
+                                                        let index = next_content_index;
+                                                        next_content_index += 1;
                                                         let event = json!({
-                                                            "type": "content_block_stop",
-                                                            "index": index
+                                                            "type": "content_block_start",
+                                                            "index": index,
+                                                            "content_block": {
+                                                                "type": "text",
+                                                                "text": ""
+                                                            }
                                                         });
-                                                        let sse_data = format!("event: content_block_stop\ndata: {}\n\n",
+                                                        let sse_data = format!("event: content_block_start\ndata: {}\n\n",
+                                                            serde_json::to_string(&event).unwrap_or_default());
+                                                        yield Ok(Bytes::from(sse_data));
+                                                        current_non_tool_block_type = Some("text");
+                                                        current_non_tool_block_index = Some(index);
+                                                    }
+
+                                                    if let Some(index) = current_non_tool_block_index {
+                                                        let event = json!({
+                                                            "type": "content_block_delta",
+                                                            "index": index,
+                                                            "delta": {
+                                                                "type": "text_delta",
+                                                                "text": content
+                                                            }
+                                                        });
+                                                        let sse_data = format!("event: content_block_delta\ndata: {}\n\n",
                                                             serde_json::to_string(&event).unwrap_or_default());
                                                         yield Ok(Bytes::from(sse_data));
                                                     }
-
-                                                    let index = next_content_index;
-                                                    next_content_index += 1;
-                                                    let event = json!({
-                                                        "type": "content_block_start",
-                                                        "index": index,
-                                                        "content_block": {
-                                                            "type": "text",
-                                                            "text": ""
-                                                        }
-                                                    });
-                                                    let sse_data = format!("event: content_block_start\ndata: {}\n\n",
-                                                        serde_json::to_string(&event).unwrap_or_default());
-                                                    yield Ok(Bytes::from(sse_data));
-                                                    current_non_tool_block_type = Some("text");
-                                                    current_non_tool_block_index = Some(index);
                                                 }
-
-                                                if let Some(index) = current_non_tool_block_index {
+                                            }
+                                        }
+                                        // CodeBuddy 文本缓冲 flush 条件
+                                        let should_flush_buffer = skip_reasoning
+                                            && !text_buffer.is_empty()
+                                            && (text_buffer.chars().count() >= TEXT_FLUSH_CHARS
+                                                || choice
+                                                    .delta
+                                                    .tool_calls
+                                                    .as_ref()
+                                                    .is_some_and(|tc| !tc.is_empty())
+                                                || choice
+                                                    .finish_reason
+                                                    .as_deref()
+                                                    .filter(|r| !r.is_empty())
+                                                    .is_some());
+                                        if should_flush_buffer {
+                                            if current_non_tool_block_type != Some("text") {
+                                                if let Some(index) = current_non_tool_block_index.take() {
                                                     let event = json!({
-                                                        "type": "content_block_delta",
-                                                        "index": index,
-                                                        "delta": {
-                                                            "type": "text_delta",
-                                                            "text": content
-                                                        }
+                                                        "type": "content_block_stop",
+                                                        "index": index
                                                     });
-                                                    let sse_data = format!("event: content_block_delta\ndata: {}\n\n",
+                                                    let sse_data = format!("event: content_block_stop\ndata: {}\n\n",
                                                         serde_json::to_string(&event).unwrap_or_default());
                                                     yield Ok(Bytes::from(sse_data));
                                                 }
+                                                let index = next_content_index;
+                                                next_content_index += 1;
+                                                let event = json!({
+                                                    "type": "content_block_start",
+                                                    "index": index,
+                                                    "content_block": {
+                                                        "type": "text",
+                                                        "text": ""
+                                                    }
+                                                });
+                                                let sse_data = format!("event: content_block_start\ndata: {}\n\n",
+                                                    serde_json::to_string(&event).unwrap_or_default());
+                                                yield Ok(Bytes::from(sse_data));
+                                                current_non_tool_block_type = Some("text");
+                                                current_non_tool_block_index = Some(index);
+                                            }
+                                            if let Some(index) = current_non_tool_block_index {
+                                                let content = std::mem::take(&mut text_buffer);
+                                                let event = json!({
+                                                    "type": "content_block_delta",
+                                                    "index": index,
+                                                    "delta": {
+                                                        "type": "text_delta",
+                                                        "text": content
+                                                    }
+                                                });
+                                                let sse_data = format!("event: content_block_delta\ndata: {}\n\n",
+                                                    serde_json::to_string(&event).unwrap_or_default());
+                                                yield Ok(Bytes::from(sse_data));
                                             }
                                         }
 
@@ -732,7 +820,7 @@ mod tests {
         let upstream = stream::iter(vec![Ok::<_, std::io::Error>(Bytes::from(
             input.as_bytes().to_vec(),
         ))]);
-        let converted = create_anthropic_sse_stream(upstream);
+        let converted = create_anthropic_sse_stream(upstream, false);
         let chunks: Vec<_> = converted.collect().await;
         let merged = chunks
             .into_iter()
@@ -780,7 +868,7 @@ mod tests {
         let upstream = stream::iter(vec![Ok::<_, std::io::Error>(Bytes::from(
             input.as_bytes().to_vec(),
         ))]);
-        let converted = create_anthropic_sse_stream(upstream);
+        let converted = create_anthropic_sse_stream(upstream, false);
         let chunks: Vec<_> = converted.collect().await;
 
         let merged = chunks
@@ -870,7 +958,7 @@ mod tests {
         let upstream = stream::iter(vec![Ok::<_, std::io::Error>(Bytes::from(
             input.as_bytes().to_vec(),
         ))]);
-        let converted = create_anthropic_sse_stream(upstream);
+        let converted = create_anthropic_sse_stream(upstream, false);
         let chunks: Vec<_> = converted.collect().await;
         let merged = chunks
             .into_iter()
@@ -952,7 +1040,7 @@ mod tests {
             Ok::<_, std::io::Error>(chunk1),
             Ok::<_, std::io::Error>(chunk2),
         ]);
-        let converted = create_anthropic_sse_stream(upstream);
+        let converted = create_anthropic_sse_stream(upstream, false);
         let chunks: Vec<_> = converted.collect().await;
 
         let merged = chunks
@@ -984,7 +1072,7 @@ mod tests {
         let upstream = stream::iter(vec![Ok::<_, std::io::Error>(Bytes::from(
             input.as_bytes().to_vec(),
         ))]);
-        let converted = create_anthropic_sse_stream(upstream);
+        let converted = create_anthropic_sse_stream(upstream, false);
         let chunks: Vec<_> = converted.collect().await;
 
         let merged = chunks
@@ -1223,7 +1311,7 @@ mod tests {
         let upstream = stream::iter(vec![Err::<Bytes, _>(std::io::Error::other(
             "upstream disconnected",
         ))]);
-        let converted = create_anthropic_sse_stream(upstream);
+        let converted = create_anthropic_sse_stream(upstream, false);
         let chunks: Vec<_> = converted.collect().await;
 
         let merged = chunks
