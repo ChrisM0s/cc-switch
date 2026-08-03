@@ -2267,6 +2267,10 @@ function ProviderFormFull({
                 presetProviderType === "codebuddy_oauth" ||
                 initialData?.meta?.providerType === "codebuddy_oauth"
               }
+              isZcodePreset={
+                presetProviderType === "zcode" ||
+                initialData?.meta?.providerType === "zcode"
+              }
               usesOAuth={
                 templatePreset?.requiresOAuth === true ||
                 presetProviderType === "github_copilot" ||

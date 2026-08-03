@@ -61,7 +61,7 @@ export interface ProviderPreset {
   // 供应商类型标识（用于特殊供应商检测）
   // - "github_copilot": GitHub Copilot 供应商（需要 OAuth 认证）
   // - "codex_oauth": OpenAI Codex via ChatGPT Plus/Pro 反代（需要 OAuth 认证）
-  providerType?: "github_copilot" | "codex_oauth" | "xai_oauth" | "codebuddy_oauth";
+  providerType?: "github_copilot" | "codex_oauth" | "xai_oauth" | "codebuddy_oauth" | "zcode";
 
   // 是否需要 OAuth 认证（而非 API Key）
   requiresOAuth?: boolean;
@@ -911,6 +911,46 @@ export const providerPresets: ProviderPreset[] = [
       },
     },
     category: "cn_official",
+    icon: "zhipu",
+    iconColor: "#0F62FE",
+  },
+  {
+    name: "Zhipu GLM (ZCode)",
+    websiteUrl: "https://z.ai",
+    apiKeyUrl: "https://z.ai/subscribe?ic=8JVLJQFSKB",
+    settingsConfig: {
+      env: {
+        ANTHROPIC_BASE_URL: "https://api.z.ai/api/coding/paas/v4",
+        ANTHROPIC_AUTH_TOKEN: "",
+        ANTHROPIC_MODEL: "glm-5.1",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.1",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.1",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5.1",
+      },
+    },
+    category: "cn_official",
+    apiFormat: "openai_chat",
+    providerType: "zcode",
+    icon: "zhipu",
+    iconColor: "#0F62FE",
+  },
+  {
+    name: "Zhipu GLM (ZCode CN)",
+    websiteUrl: "https://open.bigmodel.cn",
+    apiKeyUrl: "https://www.bigmodel.cn/claude-code?ic=RRVJPB5SII",
+    settingsConfig: {
+      env: {
+        ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/coding/paas/v4",
+        ANTHROPIC_AUTH_TOKEN: "",
+        ANTHROPIC_MODEL: "glm-5.1",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.1",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.1",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-5.1",
+      },
+    },
+    category: "cn_official",
+    apiFormat: "openai_chat",
+    providerType: "zcode",
     icon: "zhipu",
     iconColor: "#0F62FE",
   },

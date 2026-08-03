@@ -49,6 +49,9 @@ pub fn get_claude_api_format(provider: &Provider) -> &'static str {
         if meta.provider_type.as_deref() == Some("codebuddy_oauth") {
             return "codebuddy";
         }
+        if meta.provider_type.as_deref() == Some("zcode") {
+            return "openai_chat";
+        }
     }
 
     // 1) Preferred: meta.apiFormat (SSOT, never written to Claude Code config)
@@ -503,6 +506,11 @@ impl ClaudeAdapter {
         // 检测 CodeBuddy OAuth（腾讯云 CodeBuddy）
         if self.is_codebuddy_oauth(provider) {
             return ProviderType::CodeBuddyOAuth;
+        }
+
+        // 检测 ZCode provider（Z.AI / Bigmodel coding-plan）
+        if super::zcode_identity::is_zcode_provider(provider) {
+            return ProviderType::ZCode;
         }
 
         // 检测 GitHub Copilot

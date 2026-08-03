@@ -29,6 +29,9 @@ use crate::proxy::providers::codebuddy_oauth_auth::{
 use crate::proxy::providers::codex_oauth_auth::CodexOAuthManager;
 use crate::proxy::providers::copilot_auth::CopilotAuthManager;
 use crate::proxy::providers::xai_oauth_auth::XaiOAuthManager;
+use crate::proxy::providers::zcode_identity::{
+    build_zcode_identity_headers, build_zcode_trace_headers, is_zcode_provider,
+};
 use crate::{
     app_config::AppType,
     provider::{LocalProxyRequestOverrides, Provider},
@@ -1442,6 +1445,9 @@ impl RequestForwarder {
         // but enterprise endpoints like h3c.copilot.qq.com don't match that check.
         let effective_endpoint = if provider.is_codebuddy_oauth() {
             "/v2/chat/completions".to_string()
+        // ZCode: use /chat/completions without /v1/ prefix (Z.AI/Bigmodel coding-plan endpoint)
+        } else if is_zcode_provider(provider) {
+            "/chat/completions".to_string()
         } else {
             effective_endpoint
         };
@@ -1566,6 +1572,15 @@ impl RequestForwarder {
                 let api_format = resolved_claude_api_format
                     .as_deref()
                     .unwrap_or_else(|| super::providers::get_claude_api_format(provider));
+                // ZCode: 在转换为 OpenAI Chat 格式前，先对 Anthropic 请求体
+                // 添加 cache_control.ephemeral（对齐官方 ZCode 客户端行为）
+                let mapped_body = if is_zcode_provider(provider) {
+                    super::providers::zcode_transform::apply_zcode_anthropic_transforms(
+                        mapped_body,
+                    )?
+                } else {
+                    mapped_body
+                };
                 super::providers::transform_claude_request_for_api_format(
                     mapped_body,
                     provider,
@@ -1887,6 +1902,27 @@ impl RequestForwarder {
             auth_headers = build_codebuddy_chat_headers_from_runtime(runtime_auth)?;
         }
 
+        // ZCode provider: inject ZCode identity + trace headers for upstream
+        // fingerprinting, mirroring the official ZCode desktop client.
+        if is_zcode_provider(provider) {
+            let identity_headers = build_zcode_identity_headers()?;
+            let trace_headers = build_zcode_trace_headers();
+            for (name, value) in identity_headers {
+                if let Ok(hv) = http::HeaderValue::from_str(&value) {
+                    auth_headers.push((
+                        http::HeaderName::from_bytes(name.as_bytes())
+                            .unwrap_or_else(|_| http::HeaderName::from_static("x-unknown")),
+                        hv,
+                    ));
+                }
+            }
+            for (name, value) in trace_headers {
+                if let Ok(hv) = http::HeaderValue::from_str(&value) {
+                    auth_headers.push((http::HeaderName::from_static(name), hv));
+                }
+            }
+        }
+
         let codex_oauth_session_headers =
             if should_send_codex_oauth_session_headers && self.session_client_provided {
                 build_codex_oauth_session_headers(&self.session_id)
@@ -2066,6 +2102,11 @@ impl RequestForwarder {
                     | "x-b3-sampled"
                     | "traceparent"
                     | "tracestate"
+                    | "x-zcode-trace-id"
+                    | "x-zcode-app-version"
+                    | "x-zcode-agent"
+                    | "x-query-id"
+                    | "x-session-id"
             ) {
                 continue;
             }

@@ -42,6 +42,8 @@ pub mod transform_codex_responses_xai_sanitize;
 pub mod transform_gemini;
 pub mod transform_responses;
 pub mod xai_oauth_auth;
+pub mod zcode_identity;
+pub mod zcode_transform;
 
 use crate::app_config::AppType;
 use crate::provider::Provider;
@@ -96,6 +98,8 @@ pub enum ProviderType {
     XaiOAuth,
     /// CodeBuddy OAuth（腾讯云 CodeBuddy，需要 Anthropic ↔ CodeBuddy Chat Completions 转换）
     CodeBuddyOAuth,
+    /// ZCode provider（Z.AI / Bigmodel coding-plan，OpenAI Chat Completions 上游）
+    ZCode,
 }
 
 impl ProviderType {
@@ -111,6 +115,7 @@ impl ProviderType {
             ProviderType::CodexOAuth => true,
             ProviderType::XaiOAuth => true,
             ProviderType::CodeBuddyOAuth => true,
+            ProviderType::ZCode => true,
             ProviderType::OpenRouter => false,
             _ => false,
         }
@@ -130,6 +135,7 @@ impl ProviderType {
             ProviderType::CodexOAuth => CHATGPT_CODEX_BASE_URL,
             ProviderType::XaiOAuth => XAI_API_BASE_URL,
             ProviderType::CodeBuddyOAuth => CODEBUDDY_API_BASE_URL,
+            ProviderType::ZCode => "https://api.z.ai/api/coding/paas/v4",
         }
     }
 
@@ -233,6 +239,7 @@ impl ProviderType {
             ProviderType::CodexOAuth => "codex_oauth",
             ProviderType::XaiOAuth => "xai_oauth",
             ProviderType::CodeBuddyOAuth => "codebuddy_oauth",
+            ProviderType::ZCode => "zcode",
         }
     }
 }
@@ -262,6 +269,7 @@ impl std::str::FromStr for ProviderType {
             "codebuddy_oauth" | "codebuddy-oauth" | "codebuddyoauth" => {
                 Ok(ProviderType::CodeBuddyOAuth)
             }
+            "zcode" => Ok(ProviderType::ZCode),
             _ => Err(format!("Invalid provider type: {s}")),
         }
     }
@@ -288,7 +296,8 @@ pub fn get_adapter_for_provider_type(provider_type: &ProviderType) -> Box<dyn Pr
         | ProviderType::GitHubCopilot
         | ProviderType::CodexOAuth
         | ProviderType::XaiOAuth
-        | ProviderType::CodeBuddyOAuth => Box::new(ClaudeAdapter::new()),
+        | ProviderType::CodeBuddyOAuth
+        | ProviderType::ZCode => Box::new(ClaudeAdapter::new()),
         ProviderType::Codex => Box::new(CodexAdapter::new()),
         ProviderType::Gemini | ProviderType::GeminiCli => Box::new(GeminiAdapter::new()),
     }

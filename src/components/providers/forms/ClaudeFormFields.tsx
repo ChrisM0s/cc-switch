@@ -113,6 +113,9 @@ interface ClaudeFormFieldsProps {
   selectedCodeBuddyAccountId?: string | null;
   onCodeBuddyAccountSelect?: (accountId: string | null) => void;
 
+  // ZCode provider (API Key based, format forced to openai_chat by backend)
+  isZcodePreset?: boolean;
+
   // Template Values
   templateValueEntries: Array<[string, TemplateValueConfig]>;
   templateValues: Record<string, TemplateValueConfig>;
@@ -196,6 +199,7 @@ export function ClaudeFormFields({
   isCodeBuddyOauthPreset,
   selectedCodeBuddyAccountId,
   onCodeBuddyAccountSelect,
+  isZcodePreset,
   templateValueEntries,
   templateValues,
   templatePresetName,
@@ -246,7 +250,7 @@ export function ClaudeFormFields({
     defaultOpusModel ||
     defaultFableModel ||
     subagentModel ||
-    (!isXaiOauthPreset && !isCodeBuddyOauthPreset && apiFormat !== "anthropic") ||
+    (!isXaiOauthPreset && !isCodeBuddyOauthPreset && !isZcodePreset && apiFormat !== "anthropic") ||
     apiKeyField !== "ANTHROPIC_AUTH_TOKEN" ||
     customUserAgent ||
     hasRequestOverrides
@@ -841,7 +845,8 @@ export function ClaudeFormFields({
             {/* API 格式选择（仅非云服务商显示） */}
             {category !== "cloud_provider" &&
               !isXaiOauthPreset &&
-              !isCodeBuddyOauthPreset && (
+              !isCodeBuddyOauthPreset &&
+              !isZcodePreset && (
               <div className="space-y-2">
                 <FormLabel htmlFor="apiFormat">
                   {t("providerForm.apiFormat", { defaultValue: "API 格式" })}
