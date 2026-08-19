@@ -727,6 +727,7 @@ impl From<&CodeBuddyAccountData> for GitHubAccount {
                 data.profile.api_endpoint,
                 profile_label
             ),
+            reauth_required: false,
         }
     }
 }
