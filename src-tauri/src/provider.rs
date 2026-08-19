@@ -77,6 +77,16 @@ impl Provider {
 
     pub fn is_codebuddy_oauth(&self) -> bool {
         self.provider_type() == Some("codebuddy_oauth")
+            // fork 兜底：早期版本保存的 CodeBuddy 供应商可能缺失 meta.providerType，
+            // 但 authBinding 已写入 codebuddy_oauth，据此恢复识别（代理转发依赖此判定）
+            || self
+                .meta
+                .as_ref()
+                .and_then(|m| m.auth_binding.as_ref())
+                .is_some_and(|b| {
+                    b.source == AuthBindingSource::ManagedAccount
+                        && b.auth_provider.as_deref() == Some("codebuddy_oauth")
+                })
     }
 
     pub fn is_github_copilot(&self) -> bool {

@@ -818,7 +818,10 @@ function ProviderFormFull({
   const isCodeBuddyOauthProvider =
     appId === "claude" &&
     (presetProviderType === "codebuddy_oauth" ||
-      initialProviderType === "codebuddy_oauth");
+      initialProviderType === "codebuddy_oauth" ||
+      // fork 兜底：早期版本保存的 CodeBuddy 供应商可能缺失 meta.providerType，
+      // 但 authBinding 已写入 codebuddy_oauth，据此恢复识别
+      initialData?.meta?.authBinding?.authProvider === "codebuddy_oauth");
   const wasCodexOfficialManagedOauthBound =
     appId === "codex" &&
     Boolean(resolveManagedAccountId(initialData?.meta, "codex_oauth"));
@@ -1750,7 +1753,9 @@ function ProviderFormFull({
         ? "codex_oauth"
         : isXaiOauthProvider
           ? "xai_oauth"
-          : undefined;
+          : isCodeBuddyOauthProvider
+            ? "codebuddy_oauth"
+            : undefined;
 
     const nextMeta: ProviderMeta = {
       ...(baseMeta ?? {}),
