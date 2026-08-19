@@ -27,22 +27,28 @@ export async function checkForUpdate(
 ): Promise<
   { status: "up-to-date" } | { status: "available"; info: UpdateInfo }
 > {
-  // 动态引入，避免在未安装插件时导致打包期问题
-  const { check } = await import("@tauri-apps/plugin-updater");
+  // fork 定制：不检查上游源仓库版本，始终视为已是最新版本。
+  // 如需恢复真实检查，取消下方注释并删除上面的 return。
+  void opts;
+  return { status: "up-to-date" };
 
-  const currentVersion = await getCurrentVersion();
-  const update = await check({ timeout: opts.timeout ?? 30000 } as any);
-
-  if (!update) {
-    return { status: "up-to-date" };
-  }
-
-  const info: UpdateInfo = {
-    currentVersion,
-    availableVersion: (update as any).version ?? "",
-    notes: (update as any).notes,
-    pubDate: (update as any).date,
-  };
-
-  return { status: "available", info };
+  // ---- 原版实现（上游版本检查，fork 中已禁用） ----
+  // // 动态引入，避免在未安装插件时导致打包期问题
+  // const { check } = await import("@tauri-apps/plugin-updater");
+  //
+  // const currentVersion = await getCurrentVersion();
+  // const update = await check({ timeout: opts.timeout ?? 30000 } as any);
+  //
+  // if (!update) {
+  //   return { status: "up-to-date" };
+  // }
+  //
+  // const info: UpdateInfo = {
+  //   currentVersion,
+  //   availableVersion: (update as any).version ?? "",
+  //   notes: (update as any).notes,
+  //   pubDate: (update as any).date,
+  // };
+  //
+  // return { status: "available", info };
 }
