@@ -15,6 +15,7 @@ mod adapter;
 mod auth;
 mod claude;
 pub mod codebuddy_auth_form;
+pub mod codebuddy_desensitize;
 pub mod codebuddy_oauth_auth;
 pub mod codebuddy_transform;
 mod codex;

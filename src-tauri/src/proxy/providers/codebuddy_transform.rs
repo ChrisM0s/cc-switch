@@ -40,6 +40,11 @@ pub fn anthropic_to_codebuddy(body: Value) -> Result<Value, ProxyError> {
     ensure_min_two_messages(&mut result);
     result["stream"] = json!(true);
 
+    // 脱敏：对客户端注入的合规模板（system prompt 品牌词、运行时上下文、
+    // 工具描述中的安全术语）做零宽脱敏与 harness 压缩，缓解 CodeBuddy
+    // 后端内容审核误伤（移植自 codebuddy2api desensitize 模块，默认开启）
+    super::codebuddy_desensitize::apply_desensitize(&mut result);
+
     Ok(result)
 }
 

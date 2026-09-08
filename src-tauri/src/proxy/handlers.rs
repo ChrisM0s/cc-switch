@@ -17,6 +17,7 @@ use super::{
     },
     handler_context::RequestContext,
     providers::{
+        codebuddy_desensitize,
         codex_chat_common::extract_reasoning_field_text,
         codex_chat_history::record_responses_sse_stream,
         get_adapter, get_claude_api_format,
@@ -616,6 +617,21 @@ async fn handle_claude_transform(
             };
             (response_headers, None, Some(upstream_response))
         };
+
+    // CodeBuddy: 非流式响应检测内容审核拦截（HTTP 200 但内容被后端拦截）。
+    // 仅 api_format == "codebuddy" 生效，不影响其他供应商。
+    if api_format == "codebuddy" {
+        if let Some(response) = upstream_response.as_ref() {
+            let content_text = response
+                .pointer("/choices/0/message/content")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("");
+            if codebuddy_desensitize::looks_like_content_filter_text(content_text) {
+                codebuddy_desensitize::log_content_filter_warning("Anthropic/非流式", content_text);
+            }
+        }
+    }
 
     // Preserve usage so a post-upstream conversion failure still records tokens.
     // The direct Anthropic branch below is already fully transformed and cannot

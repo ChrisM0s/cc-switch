@@ -2,6 +2,7 @@
 //!
 //! 实现 OpenAI SSE → Anthropic SSE 格式转换
 
+use super::codebuddy_desensitize;
 use crate::proxy::sse::{strip_sse_field, take_sse_block};
 use bytes::Bytes;
 use futures::stream::{Stream, StreamExt};
@@ -175,6 +176,9 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
         // 累积文本凑足阈值再发送，避免显示异常。非 CodeBuddy 不缓冲（正常 chunk 已够大）。
         let mut text_buffer: String = String::new();
         const TEXT_FLUSH_CHARS: usize = 20;
+        // CodeBuddy: 累积完整回复文本，用于流结束时检测内容审核拦截。
+        // 仅 skip_reasoning=true（即 CodeBuddy 路径）使用，不影响其他供应商。
+        let mut codebuddy_accumulated_text: String = String::new();
 
         tokio::pin!(stream);
 
@@ -343,6 +347,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
                                                     // CodeBuddy 模式：累积文本，凑足阈值再发，
                                                     // 避免 Claude Code 在逐字符 delta 间插入视觉空格。
                                                     text_buffer.push_str(content);
+                                                    codebuddy_accumulated_text.push_str(content);
                                                 } else {
                                                     if current_non_tool_block_type != Some("text") {
                                                         if let Some(index) = current_non_tool_block_index.take() {
@@ -741,6 +746,16 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
         // 流自然结束但未收到 [DONE] 时，确保发送缓存的 message_delta 和 message_stop。
         // 若上游已显式报错，则只保留 error 事件，避免把失败伪装成成功完成。
         if !stream_ended_with_error {
+            // CodeBuddy: 流正常结束时检测内容审核拦截（HTTP 200 但内容被后端
+            // 拦截，响应为固定拦截话术），输出显式告警，避免静默失败。
+            // 仅 skip_reasoning=true（CodeBuddy 路径）生效，不影响其他供应商。
+            if skip_reasoning {
+                let accumulated = codebuddy_accumulated_text.trim();
+                if codebuddy_desensitize::looks_like_content_filter_text(accumulated) {
+                    codebuddy_desensitize::log_content_filter_warning("Anthropic", accumulated);
+                }
+            }
+
             let emitted_pending_message_delta = if let Some((stop_reason, usage_json)) =
                 pending_message_delta.take()
             {
